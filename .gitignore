@@ -10,3 +10,5 @@ xcuserdata
 
 modules-and-plug-ins/max-external/build
 modules-and-plug-ins/python-module/build
+*~
+*.pd_linux
