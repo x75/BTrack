@@ -13,8 +13,8 @@ ldlibs += -lfftw3
 btrack~.class.sources = btrack~.cpp ../../src/BTrack.cpp ../../src/OnsetDetectionFunction.cpp
 
 # all extra files to be included in binary distribution of the library
-datafiles =
+datafiles = btrack~-help.pd
 
 # include Makefile.pdlibbuilder from submodule directory 'pd-lib-builder'
-PDLIBBUILDER_DIR=../../../externals-howto/pd-lib-builder/
+PDLIBBUILDER_DIR=./pd-lib-builder/
 include $(PDLIBBUILDER_DIR)/Makefile.pdlibbuilder
