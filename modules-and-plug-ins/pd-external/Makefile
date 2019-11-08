@@ -5,8 +5,12 @@
 # library name
 lib.name = btrack
 
+cflags = -DUSE_FFTW
+ldlibs += -lfftw3
+
 # input source file (class name == source file basename)
-class.sources = btrack~.cpp
+# class.sources = btrack~.cpp ../../src/BTrack.cpp ../../src/OnsetDetectionFunction.cpp
+btrack~.class.sources = btrack~.cpp ../../src/BTrack.cpp ../../src/OnsetDetectionFunction.cpp
 
 # all extra files to be included in binary distribution of the library
 datafiles =

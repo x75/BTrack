@@ -1,401 +1,271 @@
-//===========================================================================
-/** @file btrack~.cpp
- *  @brief The btrack~ Max external
- *  @author Adam Stark
- *  @copyright Copyright (C) 2008-2014  Queen Mary University of London
+/*
+ * HOWTO write an External for Pure data
+ * (c) 2001-2006 IOhannes m zmölnig zmoelnig[AT]iem.at
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
+ * this is the source-code for the fourth example in the HOWTO
+ * it creates a simple dsp-object:
+ * 2 input signals are mixed into 1 output signal
+ * the mixing-factor can be set via the 3rd inlet
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * for legal issues please see the file LICENSE.txt
  */
-//===========================================================================
 
-//===========================================================================
-#include "m_pd.h"			// standard Pd include
+
+/**
+ * include the interface to Pd 
+ */
+#include "m_pd.h"
 
 //===========================================================================
 // BTrack includes
+// #include "../../src/BTrack_if.h"
 #include "../../src/BTrack.h"
 #include "../../src/OnsetDetectionFunction.h"
 
-// global class pointer variable
-static t_class *btrack_tilde_class = NULL;
+#if defined(_LANGUAGE_C_PLUS_PLUS) || defined(__cplusplus)
+extern "C" {
+#endif
 
-//===========================================================================
-// struct to represent the object's state
-typedef struct _btrack {
-  // The object itself (t_pxobject in MSP instead of t_object)
-  t_object		x_obj;
-    
+/**
+ * define a new "class" 
+ */
+static t_class *btrack_tilde_class;
+
+void btrack_tilde_setup(void);
+
+/**
+ * this is the dataspace of our new object
+ * the first element is the mandatory "t_object"
+ * f_pan denotes the mixing-factor
+ * "f" is a dummy and is used to be able to send floats AS signals.
+ */
+typedef struct _btrack_tilde {
+  t_object  x_obj;
+  t_sample f_pan;
+  t_sample f;
+  
+  t_inlet *x_in2;
+  t_inlet *x_in3;
+  t_outlet*x_out;
+  
   // An instance of the BTrack beat tracker
-  BTrack			*b;
-    
+  BTrack *b;
+  float *kubi;
+  // BTHandle b;
   // Indicates whether the beat tracker should output beats
-  bool            should_output_beats;
-    
+  bool should_output_beats;
   // the time of the last bang received in milliseconds
-  long            time_of_last_bang_ms;
-    
+  long time_of_last_bang_ms;
   // a count in counter
-  long            count_in;
-    
+  long count_in;
   // the recent tempi observed during count ins
   double           count_in_tempi[3];
-    
   // An outlet for beats
   t_outlet            *beat_outlet;
-    
   // An outlet for tempo estimates
   t_outlet          *tempo_outlet;
-    
+  
 } t_btrack_tilde;
 
-
-//===========================================================================
-// method prototypes
-void *btrack_tilde_new(t_symbol *s, long argc, t_atom *argv);
-void btrack_tilde_free(t_btrack_tilde *x);
-// void btrack_tilde_assist(t_btrack_tilde *x, void *b, long m, long a, char *s);
-// void btrack_tilde_float(t_btrack_tilde *x, double f);
-void btrack_tilde_dsp(t_btrack_tilde *x, t_signal **sp); // , short *count);
-// void btrack_tilde_dsp64(t_btrack_tilde *x, t_object *dsp64, short *count, double samplerate, long maxvectorsize, long flags);
-t_int *btrack_tilde_perform(t_int *w);
-// void btrack_tilde_perform64(t_btrack_tilde *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam);
-
-//===========================================================================
 void btrack_tilde_process(t_btrack_tilde *x,double* audioFrame);
-
-// void btrack_tilde_on(t_btrack_tilde *x);
-// void btrack_tilde_off(t_btrack_tilde *x);
-
-// void btrack_tilde_fixtempo(t_btrack_tilde *x, double f);
-// void btrack_tilde_unfixtempo(t_btrack_tilde *x);
-
-void btrack_tilde_bang(t_btrack_tilde *x);
-// void btrack_tilde_countin(t_btrack_tilde *x);
-
-void outlet_beat(t_btrack_tilde *x, t_symbol *s, long argc, t_atom *argv);
-
-void btrack_tilde_setup(void) {
-  /* create a new class */
-  btrack_tilde_class = class_new(gensym("btrack~"),        /* the object's name is "btrack" */
-				 (t_newmethod) btrack_tilde_new, /* the object's constructor is "btrack_tilde_new()" */
-				 (t_method) btrack_tilde_free,                           /* no special destructor */
-				 sizeof(t_btrack_tilde),        /* the size of the data-space */
-				 CLASS_DEFAULT,               /* a normal pd object */
-				 A_GIMME,
-				 0);                          /* no creation arguments */
+void outlet_beat(t_btrack_tilde *x);
   
-  class_addmethod(btrack_tilde_class,
-		  (t_method) btrack_tilde_dsp, gensym("dsp"), A_DEFFLOAT);
-  // class_addfloat(btrack_tilde_class, (t_method)btrack_tilde_float); 
-  // class_addmethod(btrack_tilde_class, (t_method)btrack_tilde_assist, gensym("assist"), 0); 
-  /* attach functions to messages */
-  /* here we bind the "btrack_tilde_bang()" function to the class "btrack_tilde_class()" -
-   * it will be called whenever a bang is received
-   */
-  class_addbang(btrack_tilde_class, btrack_tilde_bang); 
-}
-
-/*
-//===========================================================================
-int C74_EXPORT main(void)
-{	
-  //--------------------------------------------------------------
-  t_class *c = class_new("btrack~", (method)btrack_tilde_new, (method)btrack_tilde_free, (long)sizeof(t_btrack_tilde), 0L, A_GIMME, 0);
-  
-  //--------------------------------------------------------------
-  class_addmethod(c, (method)btrack_tilde_float,		"float",	A_FLOAT, 0);
-  class_addmethod(c, (method)btrack_tilde_dsp,		"dsp",		A_CANT, 0);		// Old 32-bit MSP dsp chain compilation for Max 5 and earlier
-  class_addmethod(c, (method)btrack_tilde_dsp64,		"dsp64",	A_CANT, 0);		// New 64-bit MSP dsp chain compilation for Max 6
-  class_addmethod(c, (method)btrack_tilde_assist,	"assist",	A_CANT, 0);
-  
-  //--------------------------------------------------------------
-  class_addmethod(c, (method)btrack_tilde_on,	"on", 0);
-  class_addmethod(c, (method)btrack_tilde_off,	"off", 0);
-  
-  //--------------------------------------------------------------
-  class_addmethod(c, (method)btrack_tilde_fixtempo,		"fixtempo",	A_FLOAT, 0);
-  class_addmethod(c, (method)btrack_tilde_unfixtempo,	"unfixtempo", 0);
-    
-  //--------------------------------------------------------------
-  class_addmethod(c, (method)btrack_tilde_bang,		"bang", 0);
-  class_addmethod(c, (method)btrack_tilde_countin,	"countin", 0);
-  
-  //--------------------------------------------------------------
-  class_dspinit(c);
-  class_register(CLASS_BOX, c);
-  btrack_tilde_class = c;
-  
-  return 0;
-}
-*/
-
-//===========================================================================
-void *btrack_tilde_new(t_symbol *s, long argc, t_atom *argv)
-{
-  t_btrack_tilde *x = (t_btrack_tilde *)pd_new(btrack_tilde_class);
-  
-  if (x) {
-    // 	dsp_setup((t_object *)x, 1);	// MSP inlets: arg is # of inlets and is REQUIRED! 
-    // 									// use 0 if you don't need inlets
-    
-    // create detection function and beat tracking objects
-    x->b = new BTrack();
-    
-    // create outlets for bpm and beats
-    x->tempo_outlet = outlet_new(&x->x_obj, &s_float); // floatout(x);
-    x->beat_outlet = outlet_new(&x->x_obj, &s_bang); // bangout(x);
-    
-    // initialise variables
-    x->should_output_beats = true;
-    x->time_of_last_bang_ms = 0;
-    x->count_in = 4;
-    x->count_in_tempi[0] = 120;
-    x->count_in_tempi[1] = 120;
-    x->count_in_tempi[2] = 120;
-    
-  }
-  return (void *) x;
-}
-
-
-//===========================================================================
-void btrack_tilde_free(t_btrack_tilde *x) 
-{
-    // delete the beat tracker
-    delete x->b;
-    x->b = NULL;
-    
-    // call the dsp free function on our object
-    // dsp_free((t_object *)x);
-}
-
-
-//===========================================================================
-void btrack_tilde_assist(t_btrack_tilde *x, void *b, long m, long a, char *s)
-{
-    // if (m == ASSIST_INLET) { //inlet
-    //     if (a == 0)
-    //     {
-    //         sprintf(s, "(signal) Audio In");
-    //     }
-    // }
-    // else {	// outlet
-    //     if (a == 0)
-    //     {
-    //         sprintf(s, "Beats Out");
-    //     }
-    //     if (a == 1)
-    //     {
-    //         sprintf(s, "Tempo (bpm)");
-    //     }
-        
-    // }
-}
-
-
-//===========================================================================
-void btrack_tilde_float(t_btrack_tilde *x, double f)
-{
-
-
-}
-
-//===========================================================================
-// this function is called when the DAC is enabled, and "registers" a function for the signal chain in Max 5 and earlier.
-// In this case we register the 32-bit, "btrack_tilde_perform" method.
-void btrack_tilde_dsp(t_btrack_tilde *x, t_signal **sp, short *count)
-{
-  // get hop size and frame size
-  int hopSize = (int) sp[0]->s_n;
-  int frameSize = hopSize*2;
-  
-  // initialise the beat tracker
-  x->b->updateHopAndFrameSize(hopSize, frameSize);
-  
-  // set up dsp
-  dsp_add(btrack_tilde_perform, 3, x, sp[0]->s_vec, sp[0]->s_n);
-}
-
-
-// //===========================================================================
-// // this is the Max 6 version of the dsp method -- it registers a function for the signal chain in Max 6,
-// // which operates on 64-bit audio signals.
-// void btrack_tilde_dsp64(t_btrack_tilde *x, t_object *dsp64, short *count, double samplerate, long maxvectorsize, long flags)
-// {
-//      // get hop size and frame size
-//     int hopSize = (int) maxvectorsize;
-//     int frameSize = hopSize*2;
-    
-//     // initialise the beat tracker
-//     x->b->updateHopAndFrameSize(hopSize, frameSize);
-		
-//     // set up dsp
-// 	object_method(dsp64, gensym("dsp_add64"), x, btrack_tilde_perform64, 0, NULL);
-// }
-
-
-//===========================================================================
-// this is the 32-bit perform method for Max 5 and earlier
+/**
+ * this is the core of the object
+ * this perform-routine is called for each signal block
+ * the name of this function is arbitrary and is registered to Pd in the 
+ * btrack_tilde_dsp() function, each time the DSP is turned on
+ *
+ * the argument to this function is just a pointer within an array
+ * we have to know for ourselves how many elements inthis array are
+ * reserved for us (hint: we declare the number of used elements in the
+ * btrack_tilde_dsp() at registration
+ *
+ * since all elements are of type "t_int" we have to cast them to whatever
+ * we think is apropriate; "apropriate" is how we registered this function
+ * in btrack_tilde_dsp()
+ */
 t_int *btrack_tilde_perform(t_int *w)
 {
-	t_btrack_tilde *x = (t_btrack_tilde *)(w[1]);
-	t_float *inL = (t_float *)(w[2]);
-	int n = (int)w[3];
-	
-    double audioFrame[n];
-    
-    for (int i = 0;i < n;i++)
-    {
-        audioFrame[i] = (double) inL[i];
-    }
-    
-    btrack_tilde_process(x,audioFrame);
+  /* the first element is a pointer to the dataspace of this object */
+  t_btrack_tilde *x = (t_btrack_tilde *)(w[1]);
+
+  // t_float *inL = (t_float *)(w[2]);
+  // int n = (int)w[3];
+  
+  // double audioFrame[n];
+  
+  // for (int i = 0;i < n;i++)
+  //   {
+  //     audioFrame[i] = (double) inL[i];
+  //   }
+  
+  // btrack_tilde_process(x,audioFrame);
 		
-	// you have to return the NEXT pointer in the array OR MAX WILL CRASH
-	return w + 4;
+  // // you have to return the NEXT pointer in the array OR MAX WILL CRASH
+  // return w + 4;
+  
+  /* here is a pointer to the t_sample arrays that hold the 2 input signals */
+  t_sample  *in1 =    (t_sample *)(w[2]);
+  t_sample  *in2 =    (t_sample *)(w[3]);
+  /* here comes the signalblock that will hold the output signal */
+  t_sample  *out =    (t_sample *)(w[4]);
+  /* all signalblocks are of the same length */
+  int          n =           (int)(w[5]);
+  /* get (and clip) the mixing-factor */
+  t_sample f_pan = (x->f_pan<0)?0.0:(x->f_pan>1)?1.0:x->f_pan;
+  /* just a counter */
+  int i;
+
+  /* this is the main routine: 
+   * mix the 2 input signals into the output signal
+   */
+  for(i=0; i<n; i++)
+    {
+      out[i]=in1[i]*(1-f_pan)+in2[i]*f_pan;
+    }
+
+  /* return a pointer to the dataspace for the next dsp-object */
+  return (w+6);
 }
+
 
 // //===========================================================================
-// // this is 64-bit perform method for Max 6
-// void btrack_tilde_perform64(t_btrack_tilde *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam)
+// void btrack_tilde_process(t_btrack_tilde *x,double* audioFrame)
 // {
-// 	t_double *inL = ins[0];		// we get audio for each inlet of the object from the **ins argument
-// 	int n = sampleframes;
+//   // process the audio frame
+//   x->b->processAudioFrame(audioFrame);
     
-//     double audioFrame[n];
     
-//     for (int i = 0;i < n;i++)
+//   // if there is a beat in this frame
+//   if (x->b->beatDueInCurrentFrame())
 //     {
-//         audioFrame[i] = (double) inL[i];
+//       // outlet a beat
+//       // defer_low((t_object *)x, (t_method)outlet_beat, NULL, 0, NULL);
+//       outlet_beat(x, NULL, 0, NULL);
 //     }
-    
-//     btrack_tilde_process(x,audioFrame);
 // }
 
-//===========================================================================
-void btrack_tilde_process(t_btrack_tilde *x,double* audioFrame)
+// //===========================================================================
+// void outlet_beat(t_btrack_tilde *x)
+// {
+//   if (x->should_output_beats)
+//     {
+//       // send a bang out of the beat outlet 1
+//       outlet_bang(x->beat_outlet);
+      
+//       // send the tempo out of the tempo outlet 2
+//       outlet_float(x->tempo_outlet, (float) x->b->getCurrentTempoEstimate());
+//     }
+// }
+  
+/**
+ * register a special perform-routine at the dsp-engine
+ * this function gets called whenever the DSP is turned ON
+ * the name of this function is registered in btrack_tilde_setup()
+ */
+void btrack_tilde_dsp(t_btrack_tilde *x, t_signal **sp)
 {
-  // process the audio frame
-  x->b->processAudioFrame(audioFrame);
-    
-    
-  // if there is a beat in this frame
-  if (x->b->beatDueInCurrentFrame())
-    {
-      // outlet a beat
-      // defer_low((t_object *)x, (t_method)outlet_beat, NULL, 0, NULL);
-      outlet_beat(x, NULL, 0, NULL);
-    }
+  /* add btrack_tilde_perform() to the DSP-tree;
+   * the btrack_tilde_perform() will expect "5" arguments (packed into an
+   * t_int-array), which are:
+   * the objects data-space, 3 signal vectors (which happen to be
+   * 2 input signals and 1 output signal) and the length of the
+   * signal vectors (all vectors are of the same length)
+   */
+  
+  // // get hop size and frame size
+  // int hopSize = (int) sp[0]->s_n;
+  // int frameSize = hopSize*2;
+  
+  // // initialise the beat tracker
+  // x->b->updateHopAndFrameSize(hopSize, frameSize);
+  
+  // // set up dsp
+  // dsp_add(btrack_tilde_perform, 3, x, sp[0]->s_vec, sp[0]->s_n);
+  
+  dsp_add(btrack_tilde_perform, 5, x,
+          sp[0]->s_vec, sp[1]->s_vec, sp[2]->s_vec, sp[0]->s_n);
 }
 
-//===========================================================================
-void outlet_beat(t_btrack_tilde *x, t_symbol *s, long argc, t_atom *argv)
+/**
+ * this is the "destructor" of the class;
+ * it allows us to free dynamically allocated ressources
+ */
+void btrack_tilde_free(t_btrack_tilde *x)
 {
-    if (x->should_output_beats)
-    {
-        // send a bang out of the beat outlet 1
-        outlet_bang(x->beat_outlet);
-    
-        // send the tempo out of the tempo outlet 2
-        outlet_float(x->tempo_outlet, (float) x->b->getCurrentTempoEstimate());
-    }
+  /* free any ressources associated with the given inlet */
+  inlet_free(x->x_in2);
+  inlet_free(x->x_in3);
+
+  /* free any ressources associated with the given outlet */
+  outlet_free(x->x_out);
 }
 
-
-//===========================================================================
-void btrack_tilde_on(t_btrack_tilde *x)
+/**
+ * this is the "constructor" of the class
+ * the argument is the initial mixing-factor
+ */
+void *btrack_tilde_new(t_floatarg f)
 {
-    x->should_output_beats = true;
-}
+  t_btrack_tilde *x = (t_btrack_tilde *)pd_new(btrack_tilde_class);
 
-//===========================================================================
-void btrack_tilde_off(t_btrack_tilde *x)
-{
-    x->should_output_beats = false;
-    x->count_in = 4;
-}
+  /* save the mixing factor in our dataspace */
+  x->f_pan = f;
+  
+  /* create a new signal-inlet */
+  x->x_in2 = inlet_new(&x->x_obj, &x->x_obj.ob_pd, &s_signal, &s_signal);
 
-//===========================================================================
-void btrack_tilde_fixtempo(t_btrack_tilde *x, double f)
-{
-    x->b->fixTempo(f);
-    post("Tempo fixed to %f BPM",f);
-}
+  /* create a new passive inlet for the mixing-factor */
+  x->x_in3 = floatinlet_new (&x->x_obj, &x->f_pan);
 
-//===========================================================================
-void btrack_tilde_unfixtempo(t_btrack_tilde *x)
-{
-    x->b->doNotFixTempo();
-    post("Tempo no longer fixed");
-}
+  /* create a new signal-outlet */
+  x->x_out = outlet_new(&x->x_obj, &s_signal);
 
-//===========================================================================
-void btrack_tilde_countin(t_btrack_tilde *x)
-{
-    x->count_in = x->count_in-1;
-    
-    btrack_tilde_bang(x);
-    if (x->count_in == 0)
-    {
-        x->should_output_beats = 1;
-    }
-}
+  // // create detection function and beat tracking objects
+  // if ( (x->b = new BTrack) == NULL )
+  //   {
+  //     post( "btrack~: Cannot create BTrack object" );
+  //     return NULL;
+  //   }
+  
+  x->b = new BTrack();
+  
+  // x->b = create_btrack();
+  // post((const char*)x->b);
 
-//===========================================================================
-void btrack_tilde_bang(t_btrack_tilde *x)
-{
-    double bperiod;
-    double tempo;
-    double mean_tempo;
-    
-    // get current time in milliseconds
-    long ms = sys_getrealtime(); // systime_ms();
-    
-    // calculate beat period
-    bperiod = ((double) (ms - x->time_of_last_bang_ms))/1000.0;
-    
-    // store time since last bang
-    x->time_of_last_bang_ms = ms;
-    
-    // if beat period is between 0 and 1
-    if ((bperiod < 1.0) && (bperiod > 0.0))
-    {
-        // calculate tempo from beat period
-        tempo = (1/bperiod)*60;
-        
-        double sum = 0;
-        
-        // move back elements in tempo history and sum remaining elements
-        for (int i = 0;i < 2;i++)
-        {
-            x->count_in_tempi[i] = x->count_in_tempi[i+1];
-            sum = sum+x->count_in_tempi[i];
-        }
-        
-        // set final element to be the newly calculated tempo
-        x->count_in_tempi[2] = tempo;
-        
-        // add the new tempo to the sum
-        sum = sum+x->count_in_tempi[2];
-        
-        // calculate the mean tempo by dividing the tempo by 3
-        mean_tempo = sum/3;
-        
-        // set the tempo in the beat tracker
-        x->b->setTempo(mean_tempo);
-    }
+  post("btrack_tilde_new '%s'", (const char*)x->b);
+  
+  x->kubi = new float(1337);
+  post("btrack_tilde_new %d '%f'", x->kubi, *(x->kubi));
+  
+  return (void *)x;
 }
 
 
+/**
+ * define the function-space of the class
+ * within a single-object external the name of this function is very special
+ */
+void btrack_tilde_setup(void) {
+  btrack_tilde_class = class_new(gensym("btrack~"),
+        (t_newmethod)btrack_tilde_new,
+        (t_method)btrack_tilde_free,
+	sizeof(t_btrack_tilde),
+        CLASS_DEFAULT, 
+        A_DEFFLOAT, 0);
 
+  /* whenever the audio-engine is turned on, the "btrack_tilde_dsp()" 
+   * function will get called
+   */
+  class_addmethod(btrack_tilde_class,
+		  (t_method)btrack_tilde_dsp, gensym("dsp"), A_CANT, 0);
+  /* if no signal is connected to the first inlet, we can as well 
+   * connect a number box to it and use it as "signal"
+   */
+  CLASS_MAINSIGNALIN(btrack_tilde_class, t_btrack_tilde, f);
+}
+
+#if defined(_LANGUAGE_C_PLUS_PLUS) || defined(__cplusplus)
+}
+#endif

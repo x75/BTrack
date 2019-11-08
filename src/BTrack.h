@@ -33,6 +33,7 @@
  * contains some static functions for calculating beat times in seconds
  */
 class BTrack {
+  // struct BTrack {
 	
 public:
     
