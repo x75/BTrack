@@ -1,15 +1,24 @@
-/*
- * HOWTO write an External for Pure data
- * (c) 2001-2006 IOhannes m zmölnig zmoelnig[AT]iem.at
+//===========================================================================
+/** @file btrack~.cpp
+ *  @brief The btrack~ Pd external
+ *  @author Oswald Berthold
+ *  @note based on max-external code btrack~.cpp by Adam Stark and external-howto code by IOhannes Zmölnig
+ *  @copyright Copyright (C) Jetpack Cognition Lab
  *
- * this is the source-code for the fourth example in the HOWTO
- * it creates a simple dsp-object:
- * 2 input signals are mixed into 1 output signal
- * the mixing-factor can be set via the 3rd inlet
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
  *
- * for legal issues please see the file LICENSE.txt
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-
+//===========================================================================
 
 /**
  * include the interface to Pd 
@@ -18,7 +27,6 @@
 
 //===========================================================================
 // BTrack includes
-// #include "../../src/BTrack_if.h"
 #include "../../src/BTrack.h"
 #include "../../src/OnsetDetectionFunction.h"
 
@@ -26,49 +34,51 @@
 extern "C" {
 #endif
 
-/**
- * define a new "class" 
- */
-static t_class *btrack_tilde_class;
+  /**
+   * define a new "class" 
+   */
+  static t_class *btrack_tilde_class;
 
-void btrack_tilde_setup(void);
+  void btrack_tilde_setup(void);
 
-/**
- * this is the dataspace of our new object
- * the first element is the mandatory "t_object"
- * f_pan denotes the mixing-factor
- * "f" is a dummy and is used to be able to send floats AS signals.
- */
-typedef struct _btrack_tilde {
-  t_object  x_obj;
-  t_sample f_pan;
-  t_sample f;
-  
-  t_inlet *x_in2;
-  t_inlet *x_in3;
-  t_outlet*x_out;
-  
-  // An instance of the BTrack beat tracker
-  BTrack *b;
-  float *kubi;
-  // BTHandle b;
-  // Indicates whether the beat tracker should output beats
-  bool should_output_beats;
-  // the time of the last bang received in milliseconds
-  long time_of_last_bang_ms;
-  // a count in counter
-  long count_in;
-  // the recent tempi observed during count ins
-  double           count_in_tempi[3];
-  // An outlet for beats
-  t_outlet            *beat_outlet;
-  // An outlet for tempo estimates
-  t_outlet          *tempo_outlet;
-  
-} t_btrack_tilde;
+  /**
+   * this is the dataspace of our new object
+   * the first element is the mandatory "t_object"
+   * f_pan denotes the mixing-factor
+   * "f" is a dummy and is used to be able to send floats AS signals.
+   */
+  typedef struct _btrack_tilde {
+    t_object  x_obj;
+    t_sample f;
+    // An instance of the BTrack beat tracker
+    BTrack *b;
+    // Indicates whether the beat tracker should output beats
+    bool should_output_beats;
+    // the time of the last bang received in milliseconds
+    long time_of_last_bang_ms;
+    // a count in counter
+    long count_in;
+    // the recent tempi observed during count ins
+    double           count_in_tempi[3];
+    // An outlet for beats
+    t_outlet            *beat_outlet;
+    // An outlet for tempo estimates
+    t_outlet          *tempo_outlet;
+  } t_btrack_tilde;
 
-void btrack_tilde_process(t_btrack_tilde *x,double* audioFrame);
-void outlet_beat(t_btrack_tilde *x);
+  // forward method declarations
+  void btrack_tilde_process(t_btrack_tilde *x,double* audioFrame);
+  
+  void btrack_tilde_on(t_btrack_tilde *x);
+  void btrack_tilde_off(t_btrack_tilde *x);
+  
+  void btrack_tilde_fixtempo(t_btrack_tilde *x, t_floatarg f);
+  void btrack_tilde_unfixtempo(t_btrack_tilde *x);
+  
+  void btrack_tilde_bang(t_btrack_tilde *x);
+  void btrack_tilde_countin(t_btrack_tilde *x);
+  
+  void outlet_beat(t_btrack_tilde *x);
   
 /**
  * this is the core of the object
@@ -90,74 +100,51 @@ t_int *btrack_tilde_perform(t_int *w)
   /* the first element is a pointer to the dataspace of this object */
   t_btrack_tilde *x = (t_btrack_tilde *)(w[1]);
 
-  // t_float *inL = (t_float *)(w[2]);
-  // int n = (int)w[3];
+  t_float *inL = (t_float *)(w[2]);
+  int n = (int)w[3];
   
-  // double audioFrame[n];
+  double audioFrame[n];
   
-  // for (int i = 0;i < n;i++)
-  //   {
-  //     audioFrame[i] = (double) inL[i];
-  //   }
-  
-  // btrack_tilde_process(x,audioFrame);
-		
-  // // you have to return the NEXT pointer in the array OR MAX WILL CRASH
-  // return w + 4;
-  
-  /* here is a pointer to the t_sample arrays that hold the 2 input signals */
-  t_sample  *in1 =    (t_sample *)(w[2]);
-  t_sample  *in2 =    (t_sample *)(w[3]);
-  /* here comes the signalblock that will hold the output signal */
-  t_sample  *out =    (t_sample *)(w[4]);
-  /* all signalblocks are of the same length */
-  int          n =           (int)(w[5]);
-  /* get (and clip) the mixing-factor */
-  t_sample f_pan = (x->f_pan<0)?0.0:(x->f_pan>1)?1.0:x->f_pan;
-  /* just a counter */
-  int i;
-
-  /* this is the main routine: 
-   * mix the 2 input signals into the output signal
-   */
-  for(i=0; i<n; i++)
+  for (int i = 0;i < n;i++)
     {
-      out[i]=in1[i]*(1-f_pan)+in2[i]*f_pan;
+      audioFrame[i] = (double) inL[i];
     }
-
+  
+  btrack_tilde_process(x,audioFrame);
+		
   /* return a pointer to the dataspace for the next dsp-object */
-  return (w+6);
+  return w + 4;
 }
 
 
-// //===========================================================================
-// void btrack_tilde_process(t_btrack_tilde *x,double* audioFrame)
-// {
-//   // process the audio frame
-//   x->b->processAudioFrame(audioFrame);
+//===========================================================================
+void btrack_tilde_process(t_btrack_tilde *x,double* audioFrame)
+{
+  // process the audio frame
+  x->b->processAudioFrame(audioFrame);
     
     
-//   // if there is a beat in this frame
-//   if (x->b->beatDueInCurrentFrame())
-//     {
-//       // outlet a beat
-//       // defer_low((t_object *)x, (t_method)outlet_beat, NULL, 0, NULL);
-//       outlet_beat(x, NULL, 0, NULL);
-//     }
-// }
+  // if there is a beat in this frame
+  if (x->b->beatDueInCurrentFrame())
+    {
+      // outlet a beat
+      // defer_low((t_object *)x, (t_method)outlet_beat, NULL, 0, NULL);
+      outlet_beat(x);
+    }
+}
 
-// //===========================================================================
-// void outlet_beat(t_btrack_tilde *x)
-// {
-//   if (x->should_output_beats)
-//     {
-//       // send a bang out of the beat outlet 1
-//       outlet_bang(x->beat_outlet);
+//===========================================================================
+void outlet_beat(t_btrack_tilde *x)
+{
+  if (x->should_output_beats)
+    {
+      // send a bang out of the beat outlet 1
+      outlet_bang(x->beat_outlet);
       
-//       // send the tempo out of the tempo outlet 2
-//       outlet_float(x->tempo_outlet, (float) x->b->getCurrentTempoEstimate());
-//     }
-// }
+      // send the tempo out of the tempo outlet 2
+      outlet_float(x->tempo_outlet, (float) x->b->getCurrentTempoEstimate());
+    }
+}
   
 /**
  * register a special perform-routine at the dsp-engine
@@ -167,25 +154,22 @@ t_int *btrack_tilde_perform(t_int *w)
 void btrack_tilde_dsp(t_btrack_tilde *x, t_signal **sp)
 {
   /* add btrack_tilde_perform() to the DSP-tree;
-   * the btrack_tilde_perform() will expect "5" arguments (packed into an
+   * the btrack_tilde_perform() will expect "3" arguments (packed into an
    * t_int-array), which are:
-   * the objects data-space, 3 signal vectors (which happen to be
-   * 2 input signals and 1 output signal) and the length of the
-   * signal vectors (all vectors are of the same length)
+   * the objects data-space x, 1 signal vectors and the length of the
+   * signal vector
    */
   
-  // // get hop size and frame size
-  // int hopSize = (int) sp[0]->s_n;
-  // int frameSize = hopSize*2;
+  // get hop size and frame size
+  int hopSize = (int) sp[0]->s_n;
+  int frameSize = hopSize*2;
   
-  // // initialise the beat tracker
-  // x->b->updateHopAndFrameSize(hopSize, frameSize);
+  // initialise the beat tracker
+  x->b->updateHopAndFrameSize(hopSize, frameSize);
   
-  // // set up dsp
-  // dsp_add(btrack_tilde_perform, 3, x, sp[0]->s_vec, sp[0]->s_n);
+  // set up dsp
+  dsp_add(btrack_tilde_perform, 3, x, sp[0]->s_vec, sp[0]->s_n);
   
-  dsp_add(btrack_tilde_perform, 5, x,
-          sp[0]->s_vec, sp[1]->s_vec, sp[2]->s_vec, sp[0]->s_n);
 }
 
 /**
@@ -195,51 +179,119 @@ void btrack_tilde_dsp(t_btrack_tilde *x, t_signal **sp)
 void btrack_tilde_free(t_btrack_tilde *x)
 {
   /* free any ressources associated with the given inlet */
-  inlet_free(x->x_in2);
-  inlet_free(x->x_in3);
 
   /* free any ressources associated with the given outlet */
-  outlet_free(x->x_out);
+  outlet_free(x->beat_outlet);
+  outlet_free(x->tempo_outlet);
 }
 
 /**
  * this is the "constructor" of the class
  * the argument is the initial mixing-factor
  */
-void *btrack_tilde_new(t_floatarg f)
+void *btrack_tilde_new()
 {
   t_btrack_tilde *x = (t_btrack_tilde *)pd_new(btrack_tilde_class);
 
-  /* save the mixing factor in our dataspace */
-  x->f_pan = f;
-  
-  /* create a new signal-inlet */
-  x->x_in2 = inlet_new(&x->x_obj, &x->x_obj.ob_pd, &s_signal, &s_signal);
-
-  /* create a new passive inlet for the mixing-factor */
-  x->x_in3 = floatinlet_new (&x->x_obj, &x->f_pan);
-
-  /* create a new signal-outlet */
-  x->x_out = outlet_new(&x->x_obj, &s_signal);
-
-  // // create detection function and beat tracking objects
-  // if ( (x->b = new BTrack) == NULL )
-  //   {
-  //     post( "btrack~: Cannot create BTrack object" );
-  //     return NULL;
-  //   }
-  
   x->b = new BTrack();
   
-  // x->b = create_btrack();
-  // post((const char*)x->b);
+  /* create a new signal-outlet */
+  x->beat_outlet = outlet_new(&x->x_obj, &s_bang);
+  x->tempo_outlet = outlet_new(&x->x_obj, &s_float);
 
-  post("btrack_tilde_new '%s'", (const char*)x->b);
-  
-  x->kubi = new float(1337);
-  post("btrack_tilde_new %d '%f'", x->kubi, *(x->kubi));
+  // initialise variables
+  x->should_output_beats = true;
+  x->time_of_last_bang_ms = 0;
+  x->count_in = 4;
+  x->count_in_tempi[0] = 120;
+  x->count_in_tempi[1] = 120;
+  x->count_in_tempi[2] = 120;
   
   return (void *)x;
+}
+
+//===========================================================================
+void btrack_tilde_on(t_btrack_tilde *x)
+{
+    x->should_output_beats = true;
+}
+
+//===========================================================================
+void btrack_tilde_off(t_btrack_tilde *x)
+{
+    x->should_output_beats = false;
+    x->count_in = 4;
+}
+
+//===========================================================================
+void btrack_tilde_fixtempo(t_btrack_tilde *x, t_floatarg f)
+{
+    x->b->fixTempo(f);
+    post("Tempo fixed to %f BPM",f);
+}
+
+//===========================================================================
+void btrack_tilde_unfixtempo(t_btrack_tilde *x)
+{
+    x->b->doNotFixTempo();
+    post("Tempo no longer fixed");
+}
+
+//===========================================================================
+void btrack_tilde_countin(t_btrack_tilde *x)
+{
+    x->count_in = x->count_in-1;
+    
+    btrack_tilde_bang(x);
+    if (x->count_in == 0)
+    {
+        x->should_output_beats = 1;
+    }
+}
+
+//===========================================================================
+void btrack_tilde_bang(t_btrack_tilde *x)
+{
+    double bperiod;
+    double tempo;
+    double mean_tempo;
+    
+    // get current time in milliseconds
+    long ms = sys_getrealtime(); // systime_ms();
+    
+    // calculate beat period
+    bperiod = ((double) (ms - x->time_of_last_bang_ms))/1000.0;
+    
+    // store time since last bang
+    x->time_of_last_bang_ms = ms;
+    
+    // if beat period is between 0 and 1
+    if ((bperiod < 1.0) && (bperiod > 0.0))
+    {
+        // calculate tempo from beat period
+        tempo = (1/bperiod)*60;
+        
+        double sum = 0;
+        
+        // move back elements in tempo history and sum remaining elements
+        for (int i = 0;i < 2;i++)
+        {
+            x->count_in_tempi[i] = x->count_in_tempi[i+1];
+            sum = sum+x->count_in_tempi[i];
+        }
+        
+        // set final element to be the newly calculated tempo
+        x->count_in_tempi[2] = tempo;
+        
+        // add the new tempo to the sum
+        sum = sum+x->count_in_tempi[2];
+        
+        // calculate the mean tempo by dividing the tempo by 3
+        mean_tempo = sum/3;
+        
+        // set the tempo in the beat tracker
+        x->b->setTempo(mean_tempo);
+    }
 }
 
 
@@ -253,13 +305,25 @@ void btrack_tilde_setup(void) {
         (t_method)btrack_tilde_free,
 	sizeof(t_btrack_tilde),
         CLASS_DEFAULT, 
-        A_DEFFLOAT, 0);
+        A_NULL, 0);
 
   /* whenever the audio-engine is turned on, the "btrack_tilde_dsp()" 
    * function will get called
    */
   class_addmethod(btrack_tilde_class,
 		  (t_method)btrack_tilde_dsp, gensym("dsp"), A_CANT, 0);
+  // handle bang
+  class_addbang(btrack_tilde_class, btrack_tilde_bang);
+  /* attach messages */
+  // on / off
+  class_addmethod(btrack_tilde_class, (t_method)btrack_tilde_on, gensym("on"), A_NULL);
+  class_addmethod(btrack_tilde_class, (t_method)btrack_tilde_off, gensym("off"), A_NULL);
+  // fix / unfix tempo
+  class_addmethod(btrack_tilde_class, (t_method)btrack_tilde_fixtempo, gensym("fixtempo"), A_DEFFLOAT, A_NULL);
+  class_addmethod(btrack_tilde_class, (t_method)btrack_tilde_unfixtempo, gensym("unfixtempo"), A_NULL);
+  
+  class_addmethod(btrack_tilde_class, (t_method)btrack_tilde_countin, gensym("countin"), A_NULL);
+  
   /* if no signal is connected to the first inlet, we can as well 
    * connect a number box to it and use it as "signal"
    */

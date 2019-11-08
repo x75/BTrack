@@ -29,7 +29,6 @@
 BTrack::BTrack()
  :  odf (512, 1024, ComplexSpectralDifferenceHWR, HanningWindow)
 {
-  std::cout << "bla" << std::endl;
   initialise (512, 1024);
 }
 
