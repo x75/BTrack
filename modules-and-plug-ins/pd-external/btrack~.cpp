@@ -55,7 +55,7 @@ extern "C" {
     // Indicates whether the beat tracker should output beats
     bool should_output_beats;
     // the time of the last bang received in milliseconds
-    long time_of_last_bang_ms;
+    double time_of_last_bang_ms;
     // a count in counter
     long count_in;
     // the recent tempi observed during count ins
@@ -201,7 +201,7 @@ void *btrack_tilde_new()
 
   // initialise variables
   x->should_output_beats = true;
-  x->time_of_last_bang_ms = 0;
+  x->time_of_last_bang_ms = 0.0;
   x->count_in = 4;
   x->count_in_tempi[0] = 120;
   x->count_in_tempi[1] = 120;
@@ -257,10 +257,10 @@ void btrack_tilde_bang(t_btrack_tilde *x)
     double mean_tempo;
     
     // get current time in milliseconds
-    long ms = sys_getrealtime(); // systime_ms();
+    double ms = sys_getrealtime(); // systime_ms();
     
     // calculate beat period
-    bperiod = ((double) (ms - x->time_of_last_bang_ms))/1000.0;
+    bperiod = ((double) (ms - x->time_of_last_bang_ms)); // /1000.0;
     
     // store time since last bang
     x->time_of_last_bang_ms = ms;

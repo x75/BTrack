@@ -21,7 +21,7 @@
 #X floatatom 281 379 5 0 0 0 - - -, f 5;
 #X msg 388 113 0;
 #X obj 455 256 nbx 8 14 -1e+37 1e+37 0 0 empty empty empty 0 -8 0 10
--228856 -1 -1 0.818852 256;
+-228856 -1 -1 0.437078 256;
 #N canvas 1046 366 123 217 snapshot~ 0;
 #X obj 29 107 snapshot~;
 #X obj 46 53 loadbang;
@@ -34,7 +34,7 @@
 #X connect 4 0 0 0;
 #X restore 455 227 pd snapshot~;
 #X obj 416 189 vsl 20 90 0 1 0 0 dsfsk sfg empty 0 -9 0 10 -228856
--1 -1 7288 1;
+-1 -1 3890 1;
 #X text 356 227 phase =>;
 #X text 405 267 0;
 #X obj 539 182 else/trig2bang~;
